@@ -31,3 +31,32 @@ test("dashboard keeps the responsive emergency input usable on mobile", async ({
   await page.getByRole("button", { name: "Create rescue report" }).click();
   await expect(page.locator(".report").first()).toContainText("Send automated guidance");
 });
+
+test("caller demo sends a typed fallback request and shows human-review guidance", async ({ page }) => {
+  await page.route("**/api/triage", async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "caller-demo-report",
+        created_at: "2026-08-13T08:00:00.000Z",
+        transcript: "Water is entering our home.",
+        location: "Guwahati, Assam",
+        disaster_type: "flood",
+        urgency_score: 8,
+        summary: "Water is entering our home.",
+        recommended_action: "Immediate emergency dispatch",
+        caller_guidance: "Move away from electrical hazards and wait in a safe elevated place.",
+        source_status: "NDRF guidance",
+        dispatcher_status: "pending_human_approval",
+      }),
+    });
+  });
+  await page.goto("/caller", { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "Tell us what is happening." })).toBeVisible();
+  await page.getByLabel("What happened?").fill("Water is entering our home.");
+  await page.getByLabel(/Where are you/).fill("Guwahati, Assam");
+  await page.getByRole("button", { name: "Send to command center" }).click();
+  await expect(page.getByText("Help is being prioritized")).toBeVisible();
+  await expect(page.getByText("human dispatcher is reviewing it now", { exact: false })).toBeVisible();
+});

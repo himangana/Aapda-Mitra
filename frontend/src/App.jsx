@@ -4,6 +4,161 @@ import React, { useEffect, useMemo, useState } from "react";
 // vercel.json. This avoids browser CORS failures during the live demo.
 const API_BASE_URL = "";
 
+function ProductNav({ active }) {
+  return (
+    <nav className="product-nav" aria-label="Demo views">
+      <a className={active === "caller" ? "active" : ""} href="/caller">Caller demo</a>
+      <a className={active === "dispatcher" ? "active" : ""} href="/">Dispatcher command center</a>
+    </nav>
+  );
+}
+
+function CallerDemo() {
+  const [location, setLocation] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [recordedAudio, setRecordedAudio] = useState(null);
+  const [recordingUrl, setRecordingUrl] = useState("");
+  const [status, setStatus] = useState("Ready to listen");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [report, setReport] = useState(null);
+  const recorderRef = React.useRef(null);
+  const chunksRef = React.useRef([]);
+
+  useEffect(() => () => {
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl);
+  }, [recordingUrl]);
+
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setError("Recording is not supported in this browser. Type the emergency message below instead.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setRecordedAudio(audio);
+        setRecordingUrl(URL.createObjectURL(audio));
+        setStatus("Voice message captured — transcribe it or edit the transcript below.");
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+      setError("");
+      setStatus("Recording emergency message…");
+    } catch {
+      setError("Microphone access was not granted. Type the emergency message below instead.");
+    }
+  }
+
+  function stopRecording() {
+    recorderRef.current?.stop();
+    setRecording(false);
+  }
+
+  async function transcribeRecording() {
+    if (!recordedAudio) return;
+    setSubmitting(true);
+    setStatus("Transcribing voice message…");
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("audio", recordedAudio, "emergency-message.webm");
+      const response = await fetch(`${API_BASE_URL}/api/transcribe`, { method: "POST", body: formData });
+      if (!response.ok) throw new Error("Voice transcription is temporarily unavailable.");
+      const result = await response.json();
+      if (!result.transcript?.trim()) throw new Error("We could not detect speech in that recording.");
+      setTranscript(result.transcript);
+      setStatus("Transcript ready — confirm it, then send the request.");
+    } catch (requestError) {
+      setError(`${requestError.message} You can still type or paste the caller's words for the demo.`);
+      setStatus("Use the transcript fallback to continue.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitEmergency(event) {
+    event.preventDefault();
+    if (transcript.trim().length < 2) {
+      setError("Record and transcribe a message, or enter the caller's words first.");
+      return;
+    }
+    setSubmitting(true);
+    setStatus("Sending securely to the emergency command center…");
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/triage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript, location: location || null }),
+      });
+      if (!response.ok) throw new Error("Your emergency request could not be sent. Please try again.");
+      const triageReport = await response.json();
+      setReport(triageReport);
+      setStatus("Request sent. A human dispatcher is reviewing it now.");
+      if ("speechSynthesis" in window && triageReport.caller_guidance) {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(triageReport.caller_guidance));
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+      setStatus("Unable to send request.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="caller-shell">
+      <header className="caller-header">
+        <a className="caller-brand" href="/"><span>◈</span> Aapda-Mitra</a>
+        <ProductNav active="caller" />
+      </header>
+      <section className="caller-hero">
+        <p className="eyebrow">EMERGENCY ASSISTANCE DEMO</p>
+        <h1>Tell us what is happening.</h1>
+        <p>Your voice message is transcribed and sent to a human-supervised disaster-response team.</p>
+      </section>
+      <form className="caller-card" onSubmit={submitEmergency}>
+        <div className="listen-orb" aria-hidden="true"><span className={recording ? "pulse" : ""}>⌁</span></div>
+        <h2>{recording ? "Listening…" : "Send an emergency message"}</h2>
+        <p className="caller-status" aria-live="polite">{status}</p>
+        <div className="record-controls">
+          <button className={`record-button ${recording ? "recording" : ""}`} type="button" onClick={recording ? stopRecording : startRecording}>
+            <span>{recording ? "■" : "●"}</span> {recording ? "Stop recording" : "Record message"}
+          </button>
+          {recordedAudio && <button className="secondary-button" type="button" disabled={submitting} onClick={transcribeRecording}>Transcribe recording</button>}
+        </div>
+        {recordingUrl && <audio className="recording-preview" controls src={recordingUrl}>Your browser cannot play this recording.</audio>}
+        <div className="caller-divider"><span>or use the safe text fallback</span></div>
+        <label htmlFor="caller-transcript">What happened?</label>
+        <textarea id="caller-transcript" value={transcript} onChange={(event) => setTranscript(event.target.value)} rows="5" placeholder="Example: We are trapped on the second floor. Flood water is rising outside." />
+        <label htmlFor="caller-location">Where are you? <em>(optional, but helpful)</em></label>
+        <input id="caller-location" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Area, landmark, village, or address" />
+        <button className="send-emergency" disabled={submitting}>{submitting ? "Sending…" : "Send to command center"}</button>
+        {error && <p className="error" role="alert">{error}</p>}
+      </form>
+      {report && <section className="guidance-card" aria-live="polite">
+        <p className="eyebrow">REQUEST RECEIVED · HUMAN REVIEW REQUIRED</p>
+        <h2>{report.urgency_score >= 7 ? "Help is being prioritized" : "Guidance is ready"}</h2>
+        <p>{report.caller_guidance}</p>
+        <div><b>Assessment:</b> {report.disaster_type} · urgency {report.urgency_score}/10</div>
+        <a href="/">Open dispatcher command center →</a>
+      </section>}
+      <p className="caller-disclaimer">For this prototype, always contact local emergency services in a real emergency.</p>
+    </main>
+  );
+}
+
 const samples = [
   {
     label: "Flood rescue",
@@ -53,6 +208,13 @@ function App() {
 
   useEffect(() => {
     loadReports();
+    // Browser caller demos and dispatcher screens can be opened side by side.
+    // Poll while this tab is foreground so new requests show up without a
+    // manual refresh, while keeping the prototype's backend simple.
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") loadReports();
+    }, 3000);
+    return () => window.clearInterval(refreshTimer);
   }, []);
 
   async function submitTriage(event) {
@@ -107,7 +269,7 @@ function App() {
           <p className="eyebrow">DISASTER RESPONSE COMMAND CENTER</p>
           <h1>Aapda-Mitra</h1>
         </div>
-        <div className="status"><span /> Live triage queue</div>
+        <div className="topbar-actions"><ProductNav active="dispatcher" /><div className="status"><span /> Live triage queue</div></div>
       </header>
 
       <section className="hero">
@@ -157,4 +319,8 @@ function App() {
   );
 }
 
-export default App;
+function RoutedApp() {
+  return window.location.pathname.replace(/\/$/, "") === "/caller" ? <CallerDemo /> : <App />;
+}
+
+export default RoutedApp;
