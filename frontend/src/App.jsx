@@ -40,7 +40,7 @@ function App() {
 
   async function loadReports() {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/reports`);
+      const response = await fetch(`${API_BASE_URL}/api/reports`, { cache: "no-store" });
       if (!response.ok) throw new Error("Unable to reach the triage service.");
       setReports(await response.json());
       setError("");

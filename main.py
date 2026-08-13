@@ -143,8 +143,11 @@ async def triage_call(request: TriageRequest) -> RescueReport:
 
 
 @app.get("/api/reports", response_model=list[RescueReport], tags=["dispatcher"])
-async def list_reports() -> list[RescueReport]:
+async def list_reports(response: Response) -> list[RescueReport]:
     """Return the persisted queue for the prototype dispatcher dashboard."""
+    # Dispatch queues are live operational data; neither browsers nor a proxy
+    # should return a stale copy after another dispatcher changes a report.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     return [RescueReport.model_validate(report) for report in list_stored_reports(database_path)]
 
 
