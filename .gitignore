@@ -8,6 +8,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+aapda_mitra.db
+data/*.db
 
 # Editor and operating-system files
 .DS_Store

@@ -6,24 +6,37 @@ Rime, preserving free-tier API credits while the integration pipeline is built.
 """
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 import json
 import logging
 import os
+from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
+from services.database import (
+    approve_report as approve_stored_report,
+    create_report,
+    initialize_database,
+    list_reports as list_stored_reports,
+)
+from services.triage import classify_emergency
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aapda_mitra")
+load_dotenv()
+database_path = os.getenv("SQLITE_DATABASE_PATH", "aapda_mitra.db")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Load local configuration once when the server starts."""
-    load_dotenv()
+    initialize_database(database_path)
     logger.info("Aapda-Mitra backend started in local development mode")
     yield
     logger.info("Aapda-Mitra backend stopped")
@@ -36,11 +49,105 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# The dashboard has no login in this hackathon prototype, so it sends no
+# cookies. Restrict this list to the deployed Vercel URL after deployment.
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
+
+
+class TriageRequest(BaseModel):
+    """A caller transcript supplied by the voice pipeline or demo dashboard."""
+
+    transcript: str = Field(min_length=2, max_length=2_000)
+    location: str | None = Field(default=None, max_length=240)
+
+
+class RescueReport(BaseModel):
+    """Human-reviewable result. No AI result can dispatch a rescue directly."""
+
+    id: str
+    created_at: datetime
+    transcript: str
+    location: str | None
+    disaster_type: str
+    urgency_score: int = Field(ge=0, le=10)
+    summary: str
+    recommended_action: str
+    caller_guidance: str
+    source_status: str
+    dispatcher_status: str
+
 
 @app.get("/health", tags=["system"])
 async def health_check() -> dict[str, str]:
     """Return server status without making an external API request."""
     return {"status": "ok", "service": "aapda-mitra-backend"}
+
+
+@app.post("/api/triage", response_model=RescueReport, status_code=201, tags=["triage"])
+async def triage_call(request: TriageRequest) -> RescueReport:
+    """Create a human-reviewable rescue report without dispatching anyone.
+
+    Step 3 will replace the deterministic fallback with NDRF-grounded RAG and
+    structured LLM output. The human approval gate remains mandatory.
+    """
+    result = classify_emergency(request.transcript)
+    report = RescueReport(
+        id=str(uuid4()),
+        created_at=datetime.now(UTC),
+        transcript=request.transcript.strip(),
+        location=request.location.strip() if request.location else None,
+        disaster_type=result.disaster_type,
+        urgency_score=result.urgency_score,
+        summary=request.transcript.strip()[:280],
+        recommended_action=result.recommended_action,
+        caller_guidance=result.caller_guidance,
+        source_status="Demo safety fallback; NDRF knowledge-base retrieval pending.",
+        dispatcher_status="pending_human_approval",
+    )
+    create_report(
+        database_path,
+        {
+            "id": report.id,
+            "created_at": report.created_at.isoformat(),
+            "transcript": report.transcript,
+            "location": report.location,
+            "disaster_type": report.disaster_type,
+            "urgency_score": report.urgency_score,
+            "summary": report.summary,
+            "recommended_action": report.recommended_action,
+            "caller_guidance": report.caller_guidance,
+            "source_status": report.source_status,
+            "dispatcher_status": report.dispatcher_status,
+        },
+    )
+    logger.info("Created triage report %s with urgency %d", report.id, report.urgency_score)
+    return report
+
+
+@app.get("/api/reports", response_model=list[RescueReport], tags=["dispatcher"])
+async def list_reports() -> list[RescueReport]:
+    """Return the persisted queue for the prototype dispatcher dashboard."""
+    return [RescueReport.model_validate(report) for report in list_stored_reports(database_path)]
+
+
+@app.post("/api/reports/{report_id}/approve", response_model=RescueReport, tags=["dispatcher"])
+async def approve_report(report_id: str) -> RescueReport:
+    """Record a human dispatcher's approval; this does not contact responders."""
+    report = approve_stored_report(database_path, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Rescue report not found")
+    logger.info("Dispatcher approved triage report %s", report_id)
+    return RescueReport.model_validate(report)
 
 
 def media_stream_url(request: Request) -> str:
