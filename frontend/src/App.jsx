@@ -25,6 +25,7 @@ function CallerDemo() {
   const [report, setReport] = useState(null);
   const recorderRef = React.useRef(null);
   const chunksRef = React.useRef([]);
+  const demoTranscript = "We are trapped on the roof. Flood water is rising and my grandmother cannot walk.";
 
   useEffect(() => () => {
     if (recordingUrl) URL.revokeObjectURL(recordingUrl);
@@ -86,6 +87,13 @@ function CallerDemo() {
     }
   }
 
+  function useDemoVoiceScenario() {
+    setTranscript(demoTranscript);
+    setLocation("Dibrugarh, Assam");
+    setStatus("Demo voice scenario loaded — send it to the command center.");
+    setError("");
+  }
+
   async function submitEmergency(event) {
     event.preventDefault();
     if (transcript.trim().length < 2) {
@@ -140,6 +148,7 @@ function CallerDemo() {
         </div>
         {recordingUrl && <audio className="recording-preview" controls src={recordingUrl}>Your browser cannot play this recording.</audio>}
         <div className="caller-divider"><span>or use the safe text fallback</span></div>
+        <button className="demo-voice-button" type="button" onClick={useDemoVoiceScenario}>Use demo emergency scenario</button>
         <label htmlFor="caller-transcript">What happened?</label>
         <textarea id="caller-transcript" value={transcript} onChange={(event) => setTranscript(event.target.value)} rows="5" placeholder="Example: We are trapped on the second floor. Flood water is rising outside." />
         <label htmlFor="caller-location">Where are you? <em>(optional, but helpful)</em></label>
