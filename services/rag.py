@@ -13,7 +13,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -84,11 +84,17 @@ def sync_qdrant_corpus() -> int:
     """Create/update the small official NDRF collection. Explicit admin action."""
     if not os.getenv("QDRANT_URL") or not os.getenv("QDRANT_API_KEY"):
         raise RuntimeError("QDRANT_URL and QDRANT_API_KEY are required to sync Qdrant")
-    _qdrant_request(
-        "PUT",
-        f"/collections/{COLLECTION_NAME}",
-        {"vectors": {"size": 64, "distance": "Cosine"}},
-    )
+    try:
+        _qdrant_request(
+            "PUT",
+            f"/collections/{COLLECTION_NAME}",
+            {"vectors": {"size": 64, "distance": "Cosine"}},
+        )
+    except HTTPError as exc:
+        # Qdrant returns 409 when the collection already exists.  Upserting
+        # the known point IDs below is idempotent, so a sync can be retried.
+        if exc.code != 409:
+            raise
     points = [
         {"id": index + 1, "vector": _embedding(chunk), "payload": {"text": chunk, "source_url": NDRF_FLOOD_SOURCE_URL}}
         for index, chunk in enumerate(_chunks())
