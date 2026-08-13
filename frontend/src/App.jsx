@@ -85,8 +85,10 @@ function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/reports/${reportId}/approve`, { method: "POST" });
       if (!response.ok) throw new Error("Approval could not be recorded.");
-      const approved = await response.json();
-      setReports((current) => current.map((report) => (report.id === approved.id ? approved : report)));
+      await response.json();
+      // Reload the persisted queue so this dispatcher also sees changes made
+      // by any other operator during a live incident.
+      await loadReports();
       setError("");
     } catch (requestError) {
       setError(requestError.message);
