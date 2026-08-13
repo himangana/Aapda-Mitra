@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+// Production requests stay on the Vercel origin and are proxied to Railway by
+// vercel.json. This avoids browser CORS failures during the live demo.
+const API_BASE_URL = "";
 
 const samples = [
   {

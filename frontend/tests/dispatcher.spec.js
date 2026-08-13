@@ -11,11 +11,13 @@ test("dispatcher can create and approve a critical flood rescue report", async (
   await expect(page.getByLabel("Caller transcript")).toHaveValue(/rising flood water/);
   await page.getByRole("button", { name: "Create rescue report" }).click();
 
-  const newestReport = page.locator(".report").first();
-  await expect(newestReport).toContainText("Critical");
-  await expect(newestReport).toContainText("Immediate emergency dispatch");
-  await newestReport.getByRole("button", { name: "Approve dispatch" }).click();
-  await expect(newestReport.getByText("Approved", { exact: true })).toBeVisible();
+  const createdReport = page.locator(".report").filter({
+    hasText: "We are trapped in rising flood water with my elderly mother.",
+  }).first();
+  await expect(createdReport).toContainText("Critical");
+  await expect(createdReport).toContainText("Immediate emergency dispatch");
+  await createdReport.getByRole("button", { name: "Approve dispatch" }).click();
+  await expect(createdReport.getByText("Approved", { exact: true })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 
