@@ -201,6 +201,13 @@ function App() {
     () => reports.filter((report) => report.dispatcher_status === "pending_human_approval").length,
     [reports],
   );
+  const latestReport = useMemo(
+    () => reports.reduce(
+      (latest, report) => (!latest || new Date(report.created_at) > new Date(latest.created_at) ? report : latest),
+      null,
+    ),
+    [reports],
+  );
 
   async function loadReports() {
     try {
@@ -316,6 +323,11 @@ function App() {
 
       <section className="queue">
         <div className="queue-heading"><div><p className="eyebrow">HUMAN DISPATCHER REVIEW</p><h2>Rescue queue</h2></div><button className="refresh" onClick={loadReports}>Refresh</button></div>
+        {latestReport && <aside className="incoming-report" aria-live="polite">
+          <span>Latest incoming report</span>
+          <strong>{latestReport.urgency_score}/10 · {latestReport.disaster_type}</strong>
+          <p>{latestReport.summary}</p>
+        </aside>}
         {loading ? <p className="empty">Loading reports…</p> : reports.length === 0 ? <p className="empty">No reports yet. Use the form above to run the demo.</p> : <div className="report-list">
           {reports.map((report) => <article className="report" key={report.id}>
             <div className={`score score-${report.urgency_score}`}><strong>{report.urgency_score}</strong><span>{urgencyLabel(report.urgency_score)}</span></div>

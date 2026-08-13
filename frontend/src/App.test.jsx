@@ -27,5 +27,6 @@ test("renders live-style pending reports in the command-center queue", async () 
   await waitFor(() => expect(screen.getByText("Critical")).toBeTruthy());
   expect(screen.getByText("1")).toBeTruthy();
   expect(screen.getByText("reports awaiting human approval")).toBeTruthy();
+  expect(screen.getByText("Latest incoming report")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Approve dispatch" })).toBeTruthy();
 });
