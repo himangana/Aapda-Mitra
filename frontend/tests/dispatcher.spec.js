@@ -7,12 +7,14 @@ test("dispatcher can create and approve a critical flood rescue report", async (
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "Aapda-Mitra" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Rescue queue" })).toBeVisible();
-  await page.getByRole("button", { name: "Flood rescue" }).click();
-  await expect(page.getByLabel("Caller transcript")).toHaveValue(/rising flood water/);
+  const caseId = `browser-case-${Date.now()}`;
+  const transcript = `We are trapped in rising flood water with my elderly mother. ${caseId}`;
+  await page.getByLabel("Caller transcript").fill(transcript);
+  await page.getByLabel("Location (if known)").fill("Sector 12, Delhi");
   await page.getByRole("button", { name: "Create rescue report" }).click();
 
   const createdReport = page.locator(".report").filter({
-    hasText: "We are trapped in rising flood water with my elderly mother.",
+    hasText: caseId,
   }).first();
   await expect(createdReport).toContainText("Critical");
   await expect(createdReport).toContainText("Immediate emergency dispatch");
