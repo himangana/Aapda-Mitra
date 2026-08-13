@@ -56,9 +56,17 @@ cors_origins = [
     for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
     if origin.strip()
 ]
+# Vercel gives every production deployment its own preview hostname. The
+# command-center has no cookie/session authentication, so allowing the Vercel
+# project subdomains lets the same public demo work from the stable alias and
+# from a newly generated deployment URL.
+cors_origin_regex = os.getenv(
+    "CORS_ORIGIN_REGEX", r"https://frontend-[a-z0-9-]+\.vercel\.app"
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
