@@ -34,7 +34,7 @@ from services.database import (
 from services.ai_triage import triage_with_guidance
 from services.rag import retrieve_guidance, sync_qdrant_corpus
 from services.voice import transcribe_audio
-from twilio.twiml.voice_response import Connect, VoiceResponse
+from twilio.twiml.voice_response import Connect, Gather, VoiceResponse
 
 
 logging.basicConfig(level=logging.INFO)
@@ -259,23 +259,73 @@ def media_stream_url(request: Request) -> str:
     raise ValueError("PUBLIC_BASE_URL must start with http:// or https://")
 
 
+def public_http_url(request: Request, path: str) -> str:
+    """Build an absolute Twilio callback URL from public deployment settings."""
+    public_base_url = os.getenv("PUBLIC_BASE_URL", str(request.base_url)).rstrip("/")
+    if not public_base_url.startswith(("http://", "https://")):
+        raise ValueError("PUBLIC_BASE_URL must start with http:// or https://")
+    return f"{public_base_url}{path}"
+
+
 @app.post("/twilio/voice", tags=["twilio"])
 async def answer_incoming_call(request: Request) -> Response:
-    """Answer Twilio's inbound webhook and connect the call to our WebSocket.
+    """Answer a phone call and collect a short caller speech description.
 
-    This endpoint only creates TwiML; it does not place calls or consume speech,
-    LLM, vector-search, or text-to-speech API credits.
+    Twilio's Gather flow is the reliable phone-demo path: it posts a speech
+    transcript to ``/twilio/speech``, which creates the same human-reviewable
+    report as the browser caller page. The Media Stream endpoint remains
+    available for the later low-latency Deepgram streaming integration.
     """
     try:
         response = VoiceResponse()
-        connect = Connect()
-        connect.stream(url=media_stream_url(request))
-        response.append(connect)
+        response.say("You have reached Aapda Mitra emergency assistance.", voice="alice")
+        gather = Gather(
+            input="speech",
+            action=public_http_url(request, "/twilio/speech"),
+            method="POST",
+            speech_timeout="auto",
+            language="en-IN",
+            timeout=5,
+        )
+        gather.say(
+            "Please briefly describe the emergency and your location after the tone.",
+            voice="alice",
+        )
+        response.append(gather)
+        response.say("We did not receive a message. Please call again if it is safe to do so.", voice="alice")
         return Response(content=str(response), media_type="application/xml")
     except ValueError as exc:
         logger.error("Twilio voice webhook configuration error: %s", exc)
         return Response(
             content="<Response><Say>Service configuration is unavailable.</Say></Response>",
+            media_type="application/xml",
+            status_code=500,
+        )
+
+
+@app.post("/twilio/speech", tags=["twilio"])
+async def process_twilio_speech(request: Request) -> Response:
+    """Create a dispatcher report from Twilio Gather's speech transcript."""
+    form = await request.form()
+    transcript = str(form.get("SpeechResult", "")).strip()
+    if len(transcript) < 2:
+        return Response(
+            content="<Response><Say>We could not understand the message. Please call again if it is safe.</Say></Response>",
+            media_type="application/xml",
+        )
+    try:
+        report = build_rescue_report(TriageRequest(transcript=transcript))
+        response = VoiceResponse()
+        response.say(
+            "Your report has been sent for human dispatcher review. "
+            f"Immediate safety guidance: {report.caller_guidance}",
+            voice="alice",
+        )
+        return Response(content=str(response), media_type="application/xml")
+    except Exception:
+        logger.exception("Twilio speech triage failed")
+        return Response(
+            content="<Response><Say>We are temporarily unable to process the message. Please contact local emergency services if you are in immediate danger.</Say></Response>",
             media_type="application/xml",
             status_code=500,
         )
