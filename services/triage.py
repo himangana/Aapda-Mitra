@@ -46,6 +46,8 @@ def classify_emergency(transcript: str) -> TriageResult:
         "trapped",
         "collapsed building",
         "rising water",
+        "water is rising",
+        "water rising",
         "drowning",
         "fire inside",
     )
@@ -57,7 +59,19 @@ def classify_emergency(transcript: str) -> TriageResult:
             "Stay on the line if safe. Move away from immediate danger only if you can do so safely.",
         )
 
-    high_risk = ("pregnant", "infant", "baby", "elderly", "disabled", "stranded", "rapidly")
+    high_risk = (
+        "pregnant",
+        "infant",
+        "baby",
+        "elderly",
+        "grandmother",
+        "grandfather",
+        "disabled",
+        "cannot walk",
+        "stranded",
+        "on a roof",
+        "rapidly",
+    )
     if any(keyword in text for keyword in high_risk):
         return TriageResult(
             8,
