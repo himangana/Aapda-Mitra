@@ -13,7 +13,15 @@ import os
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -23,7 +31,9 @@ from services.database import (
     initialize_database,
     list_reports as list_stored_reports,
 )
-from services.triage import classify_emergency
+from services.ai_triage import triage_with_guidance
+from services.rag import retrieve_guidance, sync_qdrant_corpus
+from services.voice import transcribe_audio
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 
@@ -95,31 +105,39 @@ class RescueReport(BaseModel):
     dispatcher_status: str
 
 
-@app.get("/health", tags=["system"])
-async def health_check() -> dict[str, str]:
-    """Return server status without making an external API request."""
-    return {"status": "ok", "service": "aapda-mitra-backend"}
+class TranscriptionResponse(BaseModel):
+    """Contract consumed by the caller recorder before it submits a report."""
+
+    transcript: str
+    provider: str
 
 
-@app.post("/api/triage", response_model=RescueReport, status_code=201, tags=["triage"])
-async def triage_call(request: TriageRequest) -> RescueReport:
-    """Create a human-reviewable rescue report without dispatching anyone.
+class KnowledgeBaseSyncResponse(BaseModel):
+    chunks_synced: int
+    collection: str
 
-    Step 3 will replace the deterministic fallback with NDRF-grounded RAG and
-    structured LLM output. The human approval gate remains mandatory.
-    """
-    result = classify_emergency(request.transcript)
+
+def build_rescue_report(request: TriageRequest) -> RescueReport:
+    """Retrieve official guidance, triage, and persist a human-reviewable item."""
+    transcript = request.transcript.strip()
+    guidance = retrieve_guidance(transcript)
+    triage = triage_with_guidance(transcript, guidance.text)
+    result = triage.result
+    source_status = (
+        f"NDRF guidance retrieved via {guidance.retrieval_mode.replace('_', ' ')}: "
+        f"{guidance.source_title}"
+    )
     report = RescueReport(
         id=str(uuid4()),
         created_at=datetime.now(UTC),
-        transcript=request.transcript.strip(),
+        transcript=transcript,
         location=request.location.strip() if request.location else None,
         disaster_type=result.disaster_type,
         urgency_score=result.urgency_score,
-        summary=request.transcript.strip()[:280],
+        summary=triage.summary,
         recommended_action=result.recommended_action,
         caller_guidance=result.caller_guidance,
-        source_status="Demo safety fallback; NDRF knowledge-base retrieval pending.",
+        source_status=source_status,
         dispatcher_status="pending_human_approval",
     )
     create_report(
@@ -138,8 +156,74 @@ async def triage_call(request: TriageRequest) -> RescueReport:
             "dispatcher_status": report.dispatcher_status,
         },
     )
-    logger.info("Created triage report %s with urgency %d", report.id, report.urgency_score)
+    logger.info(
+        "Created triage report %s with urgency %d using %s",
+        report.id,
+        report.urgency_score,
+        guidance.retrieval_mode,
+    )
     return report
+
+
+@app.get("/health", tags=["system"])
+async def health_check() -> dict[str, str]:
+    """Return server status without making an external API request."""
+    return {"status": "ok", "service": "aapda-mitra-backend"}
+
+
+@app.post("/api/triage", response_model=RescueReport, status_code=201, tags=["triage"])
+async def triage_call(request: TriageRequest) -> RescueReport:
+    """Create a human-reviewable rescue report without dispatching anyone.
+
+    Step 3 will replace the deterministic fallback with NDRF-grounded RAG and
+    structured LLM output. The human approval gate remains mandatory.
+    """
+    return build_rescue_report(request)
+
+
+@app.post("/api/caller/submit", response_model=RescueReport, status_code=201, tags=["caller"])
+async def submit_caller_transcript(request: TriageRequest) -> RescueReport:
+    """Caller-page endpoint: turn reviewed transcript + location into a queue item."""
+    return build_rescue_report(request)
+
+
+@app.post("/api/transcribe", response_model=TranscriptionResponse, tags=["caller"])
+async def transcribe_caller_audio(
+    audio: UploadFile = File(..., description="Browser MediaRecorder file"),
+) -> TranscriptionResponse:
+    """Transcribe a recorded voice message without creating a rescue report.
+
+    Caller UI should display the transcript for confirmation, then submit it to
+    ``/api/caller/submit``. Keeping those operations separate makes accidental
+    microphone submissions reviewable and creates a reliable typed fallback.
+    """
+    if audio.size is not None and audio.size > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio must be 15 MB or smaller")
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=422, detail="Audio file was empty")
+    try:
+        transcription = transcribe_audio(audio_bytes, audio.content_type or "audio/webm")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return TranscriptionResponse(
+        transcript=transcription.transcript,
+        provider=transcription.provider,
+    )
+
+
+@app.post("/api/knowledge-base/sync", response_model=KnowledgeBaseSyncResponse, tags=["knowledge-base"])
+async def sync_knowledge_base() -> KnowledgeBaseSyncResponse:
+    """Explicitly mirror the bundled official NDRF corpus into Qdrant.
+
+    It is deliberately not called on startup: that avoids surprise cloud writes
+    and lets a demo run from the included official corpus when Qdrant is down.
+    """
+    try:
+        chunks_synced = sync_qdrant_corpus()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return KnowledgeBaseSyncResponse(chunks_synced=chunks_synced, collection="ndrf_flood_guidance")
 
 
 @app.get("/api/reports", response_model=list[RescueReport], tags=["dispatcher"])
