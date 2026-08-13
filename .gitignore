@@ -10,6 +10,8 @@ __pycache__/
 .pytest_cache/
 aapda_mitra.db
 data/*.db
+node_modules/
+frontend/dist/
 
 # Editor and operating-system files
 .DS_Store
