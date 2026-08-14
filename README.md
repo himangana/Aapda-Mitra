@@ -91,6 +91,80 @@ Looking at the future of Aapda-Mitra, we see a strong opportunity for growth and
 
 ---
 
+## Getting Started (Local Setup)
+
+Aapda-Mitra has two parts: a FastAPI backend (voice-triage server) and a React/Vite frontend (dispatcher dashboard).
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/himangana/Aapda-Mitra.git
+cd Aapda-Mitra
+```
+
+### 2. Backend setup
+
+```bash
+python -m venv venv
+source venv/bin/activate    # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Fill in `.env` with your API keys (Twilio, Groq, Qdrant, Deepgram, Rime) as needed. For local testing without incurring paid API calls, the defaults already set `DEEPGRAM_STT_ENABLED=false`, `GROQ_TRIAGE_ENABLED=false`, and `QDRANT_REMOTE_ENABLED=false`, so the app falls back to mock behavior and the local NDRF corpus.
+
+Run the server:
+
+```bash
+uvicorn main:app --reload --port 8000
+```
+
+### 3. Frontend setup
+
+```bash
+cd frontend
+npm install
+cp .env.example .env
+```
+
+The default `VITE_API_BASE_URL=http://localhost:8000` already points at your local backend.
+
+```bash
+npm run dev
+```
+
+The dispatcher dashboard will be available at `http://localhost:5173`.
+
+### 4. (Optional) Live phone calls
+
+Real calls require a public HTTPS tunnel so Twilio can reach your local server, e.g.:
+
+```bash
+ngrok http 8000
+```
+
+Set the resulting URL as `PUBLIC_BASE_URL` in `.env`.
+
+### 5. Running tests
+
+```bash
+# Frontend
+cd frontend
+npm run test:ui     # Vitest unit tests
+npm run test:e2e    # Playwright end-to-end tests
+
+# Backend
+pip install pytest
+pytest tests/
+```
+
+### Notes
+
+- Full functionality (live voice calls, real-time transcription, AI triage, vector search) requires valid API keys for Twilio, Deepgram, Groq, Qdrant, and Rime — none are bundled with this repo.
+- `SQLITE_DATABASE_PATH` controls where the local SQLite database file is created; no separate database setup is required.
+
+---
+
 ## Conclusion
 
 Our goal isn't just to build another emergency platform. It's to reduce the gap between someone asking for help and the right response reaching them.
