@@ -4,9 +4,7 @@
 
 Deployment link: https://frontend-phi-seven-12.vercel.app/caller
 
-
-
-
+https://github.com/user-attachments/assets/d5ac111d-e305-481d-b877-5635098b71e1
 
 ---
 
@@ -176,3 +174,12 @@ pytest tests/
 Our goal isn't just to build another emergency platform. It's to reduce the gap between someone asking for help and the right response reaching them.
 
 Because in an emergency, every second matters. Aapda-Mitra turns those critical seconds into coordinated action — connecting the right help to the right person, when it matters most.
+
+---
+
+##Credit
+
+Rime
+Qdrant
+Waya
+Pathway
